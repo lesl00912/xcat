@@ -1,0 +1,844 @@
+			XCAT INSTALLATION
+# echo 0 > /selinux/enforce
+# sed -i 's/^SELINUX=.*$/SELINUX=disabled/' /etc/selinux/config
+# hostnamectl set-hostname master.example.com
+# echo '* soft memlock unlimited' >> /etc/security/limits.conf
+# echo '* hard memlock unlimited' >> /etc/security/limits.conf
+#  reboot
+
+# Vim xcat.local
+
+# Management node hostname
+sms_name="master"
+# Set the domain name
+domain_name="example.com"
+# IP address of management node in the cluster intranet
+sms_ip="192.168.1.100"
+# The network adapter name corresponding to the management node IP address
+sms_eth_internal="ens37"
+# OS installed, retain the default configurations.
+internal_netmask="255.255.255.0"
+# BMC username and password
+bmc_username="USERID"
+bmc_password="root@12345"
+# OS mirror pathway for xCAT
+iso_path="/isos"
+# Local repository directory for OS
+os_repo_dir="/install/custom/server"
+# Local repository directory for xCAT
+xcat_repo_dir="/install/custom/xcat"
+num_computes="2"
+compute_prefix="compute"
+c_ip[0]=192.168.1.11
+c_ip[1]=192.168.1.12
+c_mac[0]=00:50:56:2c:3e:dd
+c_mac[1]=00:50:56:21:7e:e9
+c_bmc[0]=192.168.3.11
+c_bmc[1]=192.168.3.12
+c_name[0]=compute01
+c_name[1]=compute02
+
+# chmod 600 xcat.local
+# soured xcat.local
+# mkdir -p ${iso_path}
+# mkdir -p ${os_repo_dir}
+# mount -o loop ${iso_path}/CentOS-7-x86_64-Everything-1708.iso ${os_repo_dir} 
+
+#cat << eof > ${iso_path}/EL7-OS.repo
+[EL7-OS]
+name=el7-centos
+enabled=1
+gpgcheck=0
+type=rpm-md
+baseurl=file://${os_repo_dir}
+eof
+
+
+
+
+
+Download xcat-core:
+
+#wget https://xcat.org/files/xcat/xcat-core/2.16.x_Linux/xcat-core/xcat-core-2.16.1-linux.tar.bz2
+
+Download xcat-Dep:
+
+#wget https://xcat.org/files/xcat/xcat-dep/2.x_Linux/xcat-dep-2.16.1-linux.tar.bz2
+
+#cd cd xcat-core/
+# ./mklocalrepo.sh
+#cd /root/xcat-dep/rh7/x86_64
+# ./mklocalrepo.sh
+
+Install xCAT with the following command:
+
+# yum clean all
+# yum install xCAT
+
+1.	Source the profile to add xCAT Commands to your path
+
+# source /etc/profile.d/xcat.sh
+
+2.	Check the xCAT version:
+
+# lsxcatd -a
+
+Check to verify that the xCAT database is initialized by dumping out the site table:
+
+# tabdump site
+
+• start xCAT:
+# service xcatd start
+
+# cp -a ${iso_path}/EL7-OS.repo /etc/yum.repos.d/
+
+# yum install --disablerepo=CentOS* -y yum-utils
+# yum-config-manager --disable CentOS\*
+
+Run the following command to prepare the OS image for the other nodes: 
+
+# copycds ${iso_path}/CentOS-7-x86_64-Everything-1908.iso
+
+Run the following command to confirm that the OS image has been copied: 
+
+# lsdef -t osimage 
+
+
+
+
+
+Run the following commands to import the login node configuration to xCAT: 
+
+
+# for ((i=0; i<$num_computes; i++)); do 
+mkdef -t node ${c_name[$i]} groups=compute,all arch=x86_64 netboot=xnba mgt=ipmi \
+bmcusername=${bmc_username} bmcpassword=${bmc_password} ip=${c_ip[$i]} \
+mac=${c_mac[$i]} bmc=${c_bmc[$i]} serialport=0 serialspeed=115200; 
+done 
+
+Run the following command to configure the root account password for the node: 
+
+# chtab key=system passwd.username=root passwd.password=root123
+
+Run the following commands to add host resolution:
+
+# chdef -t site domain=${domain_name}
+# chdef -t site master=${sms_ip}
+# chdef -t site nameservers=${sms_ip}
+# sed -i "/^\s*${sms_ip}\s*.*$/d" /etc/hosts
+# sed -i "/\s*${sms_name}\s*/d" /etc/hosts
+# echo "${sms_ip} ${sms_name} ${sms_name}.${domain_name} " >> /etc/hosts
+# makehosts
+
+Run the following commands to configure DHCP and DNS services:
+
+makenetworks
+makedhcp -n
+makedhcp -a
+makedns -n
+echo "search ${domain_name}" > /etc/resolv.conf
+echo "nameserver ${sms_ip}" >> /etc/resolv.conf
+
+run the following commands to set and install the necessary OS mirror:
+
+# nodeset all osimage=centos7.4-x86_64-install-compute 
+# rsetboot all net -u
+# rpower all reset
+
+# cp /etc/yum.repos.d/EL7-OS.repo /var/tmp
+# sed -i '/^baseurl=/d' /var/tmp/EL7-OS.repo
+# echo "baseurl=http://${sms_name}${os_repo_dir}" >>/var/tmp/EL7-OS.repo
+# xdcp all /var/tmp/EL7-OS.repo /etc/yum.repos.d/
+
+run the following commands to close the repo:
+
+# psh all "yum install --disablerepo=CentOS* -y yum-utils"
+# psh all "yum-config-manager --disable CentOS\*"
+
+
+
+Configure the memory for other nodes
+
+# xdcp all /etc/security/limits.conf /etc/security/limits.conf
+# psh all reboot
+
+Password less authentication 
+
+[root@master ~]# cat /etc/profile.d/ssh.sh
+if [ "$(id -u 2>/dev/null)" != "0" ]; then
+  if [ ! -f ~/.ssh/id_rsa ]; then
+    if [ -w ~ ]; then
+      echo Creating ECDSA key for ssh
+      ssh-keygen -t rsa -f ~/.ssh/id_rsa -q -N ""
+      cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+      chmod 600 ~/.ssh/authorized_keys ~/.ssh/id_rsa ~/.ssh/id_rsa.pub
+    fi
+  fi
+fi
+
+HISTORY 
+
+[root@master ~]# cat /etc/profile.d/z-env.sh
+
+######History Mgmt ##############
+export HISTSIZE=10000
+export HISTCONTROL=erasedups
+export HISTTIMEFORMAT='%F %T    '
+shopt -s histappend
+PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND$'\n'}history -a; history -c; history -r"
+
+
+SLURM INSTALLATION 
+Authentication and databases:
+Create the user for munge and slurm:
+Slurm and Munge require consistent UID and GID across every node in the cluster. For all the nodes, before you install Slurm or Munge:
+$ export MUNGEUSER=1001
+$ groupadd -g $MUNGEUSER munge
+$ useradd  -m -c "MUNGE Uid 'N' Gid Emporium" -d /var/lib/munge -u $MUNGEUSER -g munge  -s /sbin/nologin munge
+$ export SLURMUSER=1002
+$ groupadd -g $SLURMUSER slurm
+$ useradd  -m -c "SLURM workload manager" -d /var/lib/slurm -u $SLURMUSER -g slurm  -s /bin/bash slurm
+Munge Installation for authentication:
+$ yum install munge munge-libs munge-devel -y
+Create a munge authentication key:
+$ /usr/sbin/create-munge-key
+Copy the munge authentication key on every node:
+$ cp /etc/munge/munge.key /home
+$ cexec cp /home/munge.key /etc/munge 
+Set the rights:
+$ chown -R munge: /etc/munge/ /var/log/munge/ /var/lib/munge/ /run/munge/
+$ chmod 0700 /etc/munge/ /var/log/munge/ /var/lib/munge/ /run/munge/
+$ psh all chown -R munge: /etc/munge/ /var/log/munge/ /var/lib/munge/ /run/munge/
+$ psh all chmod 0700 /etc/munge/ /var/log/munge/ /var/lib/munge/ /run/munge/
+Enable and Start the munge service with:
+$ systemctl enable munge
+$ systemctl start munge
+$ cexec systemctl enable munge
+$ cexec systemctl start munge
+Test munge from the master node:
+$ munge -n | unmunge
+$ munge -n | ssh <somehost_in_cluster> unmunge
+Mariadb installation and configuration
+Install mariadb with the following command:
+$ yum install mariadb-server -y
+Activate and start the mariadb service:
+$ systemctl start mariadb
+systemctl enable mariadb
+secure the installation:
+Launch the following command to set up the root password an secure mariadb:
+$ mysql_secure_installation
+Modify the innodb configuration:
+Setting innodb_lock_wait_timeout,innodb_log_file_size and innodb_buffer_pool_size to larger values than the default is recommended.
+To do that, create a the file /etc/my.cnf.d/innodb.cnf with the following lines:
+[mysqld]
+ innodb_buffer_pool_size=1024M
+ innodb_log_file_size=64M
+ innodb_lock_wait_timeout=900
+To implement this change you have to shut down the database and move/remove logfiles:
+$ systemctl stop mariadb
+ mv /var/lib/mysql/ib_logfile? /tmp/
+ systemctl start mariadb
+________________________________________Slurm installation:
+Install the following prerequisites:
+$ yum install openssl openssl-devel pam-devel rpmbuild numactl numactl-devel hwloc hwloc-devel lua lua-devel readline-devel rrdtool-devel ncurses-devel man2html libibmad libibumad -y
+Retrieve the tarball
+$ wget https://download.schedmd.com/slurm/slurm-18.08.3.tar.bz2
+Create the RPMs:
+$ rpmbuild -ta slurm-18.08.3.tar.bz2
+RPMs are located in /root/rpmbuild/RPMS/x86_64/
+Install slurm on master and nodes
+In the RPMs’folder, launch the following command:
+$ yum --nogpgcheck localinstall slurm-*
+Create and configure the slurm_acct_db database:
+$ mysql -u root -p
+ mysql> grant all on slurm_acct_db.* TO 'slurm'@'localhost' identified by 'slurm' with grant option;
+ mysql> create database slurm_acct_db;
+Configure the slurm db backend:
+Modify the /etc/slurm/slurmdbd.conf with the following parameters:
+ AuthType=auth/munge
+  DbdAddr=localhost
+  DbdHost=localhost
+  SlurmUser=slurm
+  DebugLevel=4
+  LogFile=/var/log/slurm/slurmdbd.log
+  PidFile=/var/run/slurmdbd.pid
+  StorageType=accounting_storage/mysql
+  StorageHost=master0
+  StoragePass=slurm
+  StorageUser=slurm
+  StorageLoc=slurm_acct_db
+Then enable and start the slurmdbd service
+$ systemctl start slurmdbd
+$ systemctl enable slurmdbd
+$ systemctl status slurmdbd
+This will populate the slurm_acct_db with tables
+Configuration file /etc/slurm/slurm.conf:
+using the command lscpu on each node to get processors’ informations.
+To make a configuration file for Slurm. Modify the following parameters in /etc/slurm/slurm.conf to match with your cluster:
+ ClusterName=locuz
+ ControlMachine=master
+ ControlAddr=192.168.1.100
+ SlurmUser=slurm
+ AuthType=auth/munge
+ StateSaveLocation=/var/spool/slurmd
+ SlurmdSpoolDir=/var/spool/slurmd
+ SlurmctldLogFile=/var/log/slurm/slurmctld.log
+ SlurmdDebug=3
+ SlurmdLogFile=/var/log/slurm/slurmd.log
+ AccountingStorageHost=master
+ AccountingStoragePass=3devslu!!
+ AccountingStorageUser=slurm
+ NodeName=compute0[1-2] CPUs=16 Sockets=4 RealMemory=32004 CoresPerSocket=4 ThreadsPerCore=1 State=UNKNOWN
+ PartitionName=all Nodes=compute0[1-2] Default=YES MaxTime=INFINITE State=UP
+
+Now that the server node has the slurm.conf and slurmdbd.conf correctly filled, we need to send these filse to the other compute nodes.
+$ cp /etc/slurm/slurm.conf /home
+$ cp /etc/slurm/slurmdbd.conf /home
+$ psh all cp /home/slurm.conf /etc/slurm
+$ psh all cp /home/slurmdbd.conf /etc/slurm
+Create the folders to host the logs
+On the master node:
+$ mkdir /var/spool/slurmctld
+$ chown slurm:slurm /var/spool/slurmctld
+$ chmod 755 /var/spool/slurmctld
+$ mkdir  /var/log/slurm
+$ touch /var/log/slurm/slurmctld.log
+$ touch /var/log/slurm/slurm_jobacct.log /var/log/slurm/slurm_jobcomp.log
+$ chown -R slurm:slurm /var/log/slurm/
+On the compute nodes:
+$ mkdir /var/spool/slurmd
+$ chown slurm: /var/spool/slurmd
+$ chmod 755 /var/spool/slurmd
+$ mkdir /var/log/slurm/
+$ touch /var/log/slurm/slurmd.log
+$ chown -R slurm:slurm /var/log/slurm/slurmd.log
+test the configuration:
+$ slurmd -C
+You should get something like:
+NodeName=compute01 CPUs=1 Boards=1 SocketsPerBoard=1 CoresPerSocket=1 ThreadsPerCore=1 RealMemory=762
+UpTime=0-00:24:20
+NodeName=compute02 CPUs=1 Boards=1 SocketsPerBoard=1 CoresPerSocket=1 ThreadsPerCore=1 RealMemory=762
+UpTime=0-00:23:50
+ Launch the slurmd service on the compute nodes:
+$ systemctl enable slurmd.service
+$ systemctl start slurmd.service
+$ systemctl status slurmd.service
+Launch the slurmctld service on the master node:
+$ systemctl enable slurmctld.service
+$ systemctl start slurmctld.service
+$ systemctl status slurmctld.service
+Change the state of a node from down to idle
+$ scontrol update NodeName=compute0[1-2] State=RESUME
+Where nodeX is the name of your node
+________________________________________Configure usage limits
+Modify the /etc/slurm/slurm.conf file
+Modify the AccountingStorageEnforceparameter with:
+ AccountingStorageEnforce=limits 
+Copy the modified file to the several nodes
+Restart the slurmctld service to validate the modifications:
+$ systemctl restart slurmctld
+Create a cluster:
+The cluster is the name we want for your slurm cluster.
+It is defined in the /etc/slurm/slurm.conf file with the line
+ ClusterName=locuz
+To set usage limitations for your users, you first have to create an accounting cluster with the command:
+$sacctmgr add cluster locuz
+Create an accounting account
+An accounting account is a group under slurm that allows the administrator to manage the users rights to use slurm.
+Example: you can create a account to group the bioinfo teams members
+$ sacctmgr add account cameron Description="cameron member"
+You can create a account to group the peaople allow to use the gpu partition
+$ sacctmgr add account cameron Description="Members can use all partition"
+
+Create a user account
+You have to create slurm user to make them be able to launch slurm jobs.
+$ sacctmgr create user name=sooraj DefaultAccount=cameron
+Modify a user account to add it to another accounting account:
+$ sacctmgr add user locuz Account=Cameron
+
+[root@master centos]# cat compute.centos7.tmpl
+#
+#cmdline
+
+lang en_US
+#KICKSTARTNET#
+
+#
+# Where's the source?
+# nfs --server hostname.of.server or IP --dir /path/to/RH/CD/image
+#
+#nfs --server #XCATVAR:INSTALL_NFS# --dir #XCATVAR:INSTALL_SRC_DIR#
+
+%include /tmp/repos
+
+#device ethernet e100
+keyboard "us"
+
+#
+# Clear the MBR
+#
+zerombr
+
+#
+# Wipe out the disk
+#
+clearpart --all --initlabel
+#clearpart --linux
+
+#
+# Customize to fit your needs
+#
+
+#XCAT_PARTITION_START#
+# xCAT based partitioning
+%include /tmp/partitionfile
+
+#No RAID
+#/boot really significant for this sort of setup nowadays?
+#part /boot --size 50 --fstype ext3
+#part swap --size 1024
+#part / --size 1 --grow --fstype ext4
+
+#RAID 0 /scr for performance
+#part / --size 1024 --ondisk sda
+#part swap --size 512 --ondisk sda
+#part /var --size 1024 --ondisk sdb
+#part swap --size 512 --ondisk sdb
+#part raid.01 --size 1 --grow --ondisk sda
+#part raid.02 --size 1 --grow --ondisk sdb
+#raid /scr --level 0 --device md0 raid.01 raid.02
+
+#Full RAID 1 Sample
+#part raid.01 --size 50 --ondisk sda
+#part raid.02 --size 50 --ondisk sdb
+#raid /boot --level 1 --device md0 raid.01 raid.02
+#
+#part raid.11 --size 1024 --ondisk sda
+#part raid.12 --size 1024 --ondisk sdb
+#raid / --level 1 --device md1 raid.11 raid.12
+#
+#part raid.21 --size 1024 --ondisk sda
+#part raid.22 --size 1024 --ondisk sdb
+#raid /var --level 1 --device md2 raid.21 raid.22
+#
+#part raid.31 --size 1024 --ondisk sda
+#part raid.32 --size 1024 --ondisk sdb
+#raid swap --level 1 --device md3 raid.31 raid.32
+#
+#part raid.41 --size 1 --grow --ondisk sda
+#part raid.42 --size 1 --grow --ondisk sdb
+#raid /scr --level 1 --device md4 raid.41 raid.42
+#XCAT_PARTITION_END#
+
+#
+# bootloader config
+# --append <args>
+# --useLilo
+# --md5pass <crypted MD5 password for GRUB>
+#
+#The bootloader config here is commented out
+#For user customized partition file or partition script,
+#the bootloader configuration should be specified in the user customized partition file/script
+#For the xCAT default partition scheme, the bootloader configuration is in /tmp/partitionfile
+#which is generated in %pre section
+##KICKSTARTBOOTLOADER#
+
+#
+# install or upgrade
+#
+install
+
+#
+# text mode install (default is graphical)
+#
+text
+
+#
+# firewall
+#
+firewall --disabled
+
+#
+# Select a zone
+# Add the --utc switch if your hardware clock is set to GMT
+#
+#timezone US/Hawaii
+#timezone US/Pacific
+#timezone US/Mountain
+#timezone US/Central
+#timezone US/Eastern
+timezone --utc "#TABLE:site:key=timezone:value#"
+
+#
+# Don't do X
+#
+skipx
+
+
+#
+# To generate an encrypted root password use:
+#
+# perl -e 'print crypt("blah","Xa") . "\n";'p
+# openssl passwd -apr1 -salt xxxxxxxx password
+#
+# where "blah" is your root password.
+#
+#rootpw --iscrypted XaLGAVe1C41x2
+#rootpw XaLGAVe1C41x2 --iscrypted
+rootpw --iscrypted #CRYPT:passwd:key=system,username=root:password#
+
+#
+# NIS setup: auth --enablenis --nisdomain sensenet
+# --nisserver neptune --useshadow --enablemd5
+#
+# OR
+auth --useshadow --enablemd5
+
+#
+# SE Linux
+#
+selinux --disabled
+
+#
+# Reboot after installation
+#
+reboot
+
+#
+#end of section
+#
+%packages
+#INCLUDE_DEFAULT_PKGLIST#
+%end
+%pre
+{
+echo "Running Kickstart Pre-Installation script..."
+#INCLUDE:#ENV:XCATROOT#/share/xcat/install/scripts/pre.rh.rhels7#
+} &>>/tmp/pre-install.log
+%end
+%post
+mkdir -p /var/log/xcat/
+{
+cat >> /var/log/xcat/xcat.log << "EOF"
+%include /tmp/pre-install.log
+EOF
+echo "Running Kickstart Post-Installation script..."
+#INCLUDE:#ENV:XCATROOT#/share/xcat/install/scripts/post.xcat#
+#INCLUDE:#ENV:XCATROOT#/share/xcat/install/scripts/post.rhels7#
+} &>>/var/log/xcat/xcat.log
+
+echo 0 > /selinux/enforce
+sed -i 's/^SELINUX=.*$/SELINUX=disabled/' /etc/selinux/config
+echo '* soft memlock unlimited' >> /etc/security/limits.conf
+echo '* hard memlock unlimited' >> /etc/security/limits.conf
+
+cat > /etc/yum.repos.d/local.repo << EOF
+[local]
+name=local
+baseurl=http://192.168.1.100/install/custom/server
+enabled=1
+gpgcheck=0
+EOF
+
+mv /etc/yum.repos.d/CentOS-* /tmp/
+
+yum install --disablerepo=CentOS* -y yum-utils
+yum-config-manager --disable CentOS\*
+yum install ypbind rpcbind tcl tk vim numactl-devel nfs-utils munge munge-libs munge-devel -y
+yum groupinstall 'Development tools' -y
+
+systemctl start rpcbind ypbind
+
+mkdir /data
+mount -t nfs 192.168.1.100:/home /home
+mount -t nfs 192.168.1.100:/data /data
+
+cat >> /etc/fstab << EOF
+192.168.1.100:/home /home nfs nfsvers=4.1,nodev,noatime 0 0
+EOF
+
+
+rpm -ivh /data/rpms/munge/*.rpm
+cp /data/rpms/munge/munge.key /etc/munge/munge.key
+chown -R munge: /etc/munge/ /var/log/munge/ /var/lib/munge/ /run/munge/
+chmod 0700 /etc/munge/ /var/log/munge/ /var/lib/munge/ /run/munge/
+
+yum --nogpgcheck localinstall /data/rpms/slurm-* -y
+cp /data/slurm.conf /etc/slurm/slurm.conf
+
+cat > /etc/profile.d/z-env.sh <<EOF
+
+######History Mgmt ##############
+export HISTSIZE=10000
+export HISTCONTROL=erasedups
+export HISTTIMEFORMAT='%F %T    '
+shopt -s histappend
+PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND$'\n'}history -a; history -c; history -r"
+EOF
+
+
+source /etc/profile.d/z-env.sh
+
+## Create a user for the node exporter.
+
+useradd -rs /bin/false nodeusr
+
+cp /data/rpms/node_exporter-0.17.0.linux-amd64/node_exporter /usr/local/bin/node_exporter
+
+cat >  /etc/systemd/system/node_exporter.service <<EOF
+[Unit]
+Description=Node Exporter
+After=network.target
+
+[Service]
+User=nodeusr
+Group=nodeusr
+Type=simple
+ExecStart=/usr/local/bin/node_exporter
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl disable cups bluetooth firewalld
+systemctl start node_exporter
+systemctl enable node_exporter
+systemctl start slurmd
+systemctl enable slurmd
+
+# set NIS domain
+
+ypdomainname example.com
+echo "NISDOMAIN=example.com" >> /etc/sysconfig/network
+
+authconfig --enablenis --nisdomain=example.com --nisserver=master.example.com --enablemkhomedir --update
+
+systemctl start rpcbind ypbind
+systemctl enable rpcbind ypbind
+
+%end
+
+
+################ Install Promitus and grafana ######################
+
+
+ 1 ) Download Prometheus package
+ 
+ # wget https://github.com/prometheus/prometheus/releases/download/v2.8.1/prometheus-2.8.1.linux-amd64.tar.gz
+ 
+ 2) Add a Prometheus user
+   # useradd --no-create-home --shell /bin/false prometheus
+ 3) Create directories & change the owner of them
+  
+ [root@fosnix ~]# mkdir /etc/prometheus
+[root@fosnix ~]# mkdir /var/lib/prometheus
+[root@fosnix ~]# chown prometheus:prometheus /etc/prometheus
+[root@fosnix ~]# chown prometheus:prometheus /var/lib/prometheus
+
+4) Now Extract the Prometheus downloaded file & Rename it-
+
+[root@fosnix ~]# tar -xvzf prometheus-2.8.1.linux-amd64.tar.gz
+[root@fosnix ~]# mv prometheus-2.8.1.linux-amd64 prometheuspackage
+
+5) Copy “prometheus” and “promtool” binary from the “prometheuspackage” directory to “/usr/local/bin” & Change the ownership of them to prometheus user
+
+[root@fosnix ~]# cp prometheuspackage/prometheus /usr/local/bin/
+[root@fosnix ~]# cp prometheuspackage/promtool /usr/local/bin/
+[root@fosnix ~]# chown prometheus:prometheus /usr/local/bin/prometheus
+[root@fosnix ~]# chown prometheus:prometheus /usr/local/bin/promtool
+
+6) Copy “consoles” and “console_libraries” directories from the “prometheuspackage” to “/etc/prometheus” directory & Change the ownership of them to prometheus user
+  
+[root@fosnix ~]# cp -r prometheuspackage/consoles /etc/prometheus
+[root@fosnix ~]# cp -r prometheuspackage/consoles_libraries /etc/prometheus
+[root@fosnix ~]# chown -R prometheus:prometheus /etc/prometheus/consoles
+[root@fosnix ~]# chown -R prometheus:prometheus /etc/prometheus/console_libraries
+
+7) Now, to configure the prometheus file you have to create the prometheus.yml file & add the below lines in it
+
+[root@fosnix ~]# vim /etc/prometheus/prometheus.yml
+
+global:
+  scrape_interval: 10s
+
+scrape_configs:
+  - job_name: 'prometheus_master'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['localhost:9090']
+	  
+8) Change the Ownership of the File
+
+[root@fosnix ~]# chown prometheus:prometheus /etc/prometheus/prometheus.yml
+
+9) Configure the Prometheus Service File- Create a file and Copy paste the below lines into it
+
+
+[root@fosnix ~]# vim /etc/systemd/system/prometheus.service
+ 
+[Unit]
+Description=Prometheus
+Wants=network-online.target
+After=network-online.target
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+ExecStart=/usr/local/bin/prometheus \
+--config.file /etc/prometheus/prometheus.yml \
+--storage.tsdb.path /var/lib/prometheus/ \
+--web.console.templates=/etc/prometheus/consoles \
+--web.console.libraries=/etc/prometheus/console_libraries
+[Install]
+WantedBy=multi-user.target
+
+10) Restart the systemd file & Prometheus service
+
+[root@fosnix ~]# systemctl daemon-reload
+[root@fosnix ~]# systemctl start prometheus
+[root@fosnix ~]# systemctl status prometheus
+
+11) Access Prometheus Web Interface
+
+http://Your-Server-IP:9090/graph
+
+############## Monitor Client Server Using Prometheus  #######################
+
+1) download node exporter
+
+[root@fosnix ~]# wget https://github.com/prometheus/node_exporter/releases/download/v0.17.0/node_exporter-0.17.0.linux-amd64.tar.gz
+
+[root@fosnix ~]# tar -xvzf node_exporter-0.17.0.linux-amd64.tar.gz
+
+2) Next, Create a user for node-exporter & move to /usr/local/bin
+
+[root@fosnix ~]# useradd -rs /bin/false nodeusr
+[root@fosnix ~]# mv node_exporter-0.17.0.linux-amd64/node_exporter /usr/local/bin/
+
+3) Create a file for node-exporter & copy paste the lines below in it
+
+
+[root@fosnix ~]# vim /etc/systemd/system/node_exporter.service
+ 
+[Unit]
+Description=Node Exporter
+After=network.target
+[Service]
+User=nodeusr
+Group=nodeusr
+Type=simple
+ExecStart=/usr/local/bin/node_exporter
+[Install]
+WantedBy=multi-user.target
+
+4) Restart the system daemon,  also start & enable the node exporter
+
+[root@fosnix ~]# systemctl daemon-reload
+[root@fosnix ~]# systemctl start node_exporter
+[root@fosnix ~]# systemctl enable node_exporter
+
+5) Open your browser & type the below URL with your SERVER-IP
+
+http://Your-IP-Address:9100/metrics
+
+6) To configure the node exporter modify the prometheus.yml file 
+
+[root@fosnix ~]# vim /etc/prometheus/prometheus.yml
+ 
+- job_name: 'node_exporter_centos'
+scrape_interval: 5s
+static_configs:
+- targets: ['192.168.33.30:9100']
+
+7) Restart the prometheus service –
+
+[root@fosnix ~]# systemctl restart prometheus
+
+8) Open your browser & type the below URL with your SERVER-IP
+
+http://Main-Server-IP:9090/targets
+
+########### ----Now, Setup For Grafana---- ##################
+
+1) Insert the Grafana's repository file
+
+[root@grafana ~]# vim /etc/yum.repos.d/grafana.repo
+ 
+[grafana]
+name=grafana
+baseurl=https://packages.grafana.com/oss/rpm
+repo_gpgcheck=1
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.grafana.com/gpg.key
+sslverify=1
+sslcacert=/etc/pki/tls/certs/ca-bundle.crt
+
+2) Install Grafana 
+
+[root@grafana ~]# yum install grafana -y
+
+3) Start & Enable the grafana services
+
+[root@grafana ~]# systemctl start grafana-server
+[root@grafana ~]# systemctl enable grafana-server
+[root@grafana ~]# systemctl status grafana-server
+
+4) Open your browser & type the url with port “3000”  as shown below
+
+http://192.168.33.31:3000/
+
+Default “Username/Password” is “admin/admin”
+
+############ Slurm Dashboard ############# 
+
+1) Use Git to clone the source code of the exporter, and download all Go dependency modules:
+# clone the source code
+git clone https://github.com/vpenso/prometheus-slurm-exporter.git
+cd prometheus-slurm-exporter
+# download dependencies
+export GOPATH=$PWD/go/modules
+go mod download
+
+2) Build the exporter:
+go build -o bin/prometheus-slurm-exporter {main,accounts,cpus,gpus,partitions,node,nodes,queue,scheduler,sshare,users}.go
+
+3) Run all tests included in _test.go files:
+go test -v *.go
+
+4)Start the exporter (foreground), and query all metrics:
+
+ bin/prometheus-slurm-exporter
+ 
+5)If you wish to run the exporter on a different port, or the default port (8080) is already in use, run with the following argument:
+
+bin/prometheus-slurm-exporter --listen-address="0.0.0.0:<port>"
+# query all metrics (default port)
+curl http://localhost:8080/metrics
+
+6) metheus Configuration for the SLURM exporter
+scrape_configs:
+
+#
+# SLURM resource manager:
+#
+  - job_name: 'my_slurm_exporter'
+
+    scrape_interval:  30s
+
+    scrape_timeout:   30s
+
+    static_configs:
+      - targets: ['slurm_host.fqdn:8080']
+7) 
+
+
+
+
+
+ 
+
+  
+ 
+
+
